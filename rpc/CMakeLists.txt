@@ -30,9 +30,15 @@ add_executable(rpc_server src/main_rpc_server.cpp)
 target_link_libraries(rpc_server
     PRIVATE
         up-client-zenoh-cpp::up-client-zenoh-cpp)
+target_link_libraries(rpc_server
+    PRIVATE
+        zenohc)
 
 # rpc client
 add_executable(rpc_client src/main_rpc_client.cpp)
 target_link_libraries(rpc_client
     PRIVATE
         up-client-zenoh-cpp::up-client-zenoh-cpp)
+target_link_libraries(rpc_client
+    PRIVATE
+        zenohc)

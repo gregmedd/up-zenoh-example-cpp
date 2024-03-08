@@ -30,9 +30,15 @@ add_executable(sub src/main_sub.cpp)
 target_link_libraries(sub
     PRIVATE
         up-client-zenoh-cpp::up-client-zenoh-cpp)
+target_link_libraries(sub
+    PRIVATE
+        zenohc)
 
 # pub
 add_executable(pub src/main_pub.cpp)
 target_link_libraries(pub
     PRIVATE
         up-client-zenoh-cpp::up-client-zenoh-cpp)
+target_link_libraries(pub
+    PRIVATE
+        zenohc)

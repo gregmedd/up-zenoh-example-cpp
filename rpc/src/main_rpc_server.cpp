@@ -21,106 +21,72 @@
  * SPDX-FileCopyrightText: 2024 General Motors GTO LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <iostream>
 #include <chrono>
 #include <csignal>
 #include <unistd.h>
-#include <up-client-zenoh-cpp/client/upZenohClient.h>
-#include <up-cpp/uuid/factory/Uuidv8Factory.h>
-#include <up-cpp/transport/builder/UAttributesBuilder.h>
+#include <up-client-zenoh-cpp/transport/ZenohUTransport.h>
+#include <up-cpp/client/RpcTarget.h>
 #include <spdlog/spdlog.h>
 
 #include "common.h"
 
-using namespace uprotocol::utransport;
-using namespace uprotocol::uuid;
-using namespace uprotocol::uri;
-using namespace uprotocol::client;
-
 bool gTerminate = false;
 
 void signalHandler(int signal) {
-    if (signal == SIGINT) {
-        std::cout << "Ctrl+C received. Exiting..." << std::endl;
-        gTerminate = true; 
-    }
+	if (signal == SIGINT) {
+		spdlog::info("Ctrl+C received. Exiting...");
+		gTerminate = true; 
+	}
 }
 
-class RpcListener : public UListener {
+/// @brief RPC Target serving out current time as milliseconds from epoch
+struct TimeService {
+	/// @brief
+	using UriAsString = uprotocol::datamodel::serializer::uuri::asString;
 
-    public:
-       
-         UStatus onReceive(UMessage &message) const override {
-            /* Construct response payload with the current time */
-            auto currentTime = std::chrono::system_clock::now();
-            uint64_t currentTimeMilli =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                        currentTime.time_since_epoch()).count();
+	/// @brief
+	TimeService(std::shared_ptr<uprotocol::transport::UTransport> transport)
+		: target_( std::move(transport), timeServerUri(),
+				std::move([this](const uprotocol::v1::UMessage& m){
+					giveTime(m);
+				})) { }
 
-            UPayload responsePayload(
-                    reinterpret_cast<const uint8_t*>(&currentTimeMilli),
-                    sizeof(currentTimeMilli),
-                    UPayloadType::VALUE);
+	/// @brief
+	void giveTime(const uprotocol::v1::UMessage& request) const {
+		auto now = timeSinceEpoch();
+		target_.respondTo<TimeAsPayload>(request, now);
+	}
 
-            /* Build response attributes - the same UUID should be used to send the response 
-             * it is also possible to send the response outside of the callback context */
-            auto builder = UAttributesBuilder::response(
-                    message.attributes().sink(),
-                    message.attributes().source(),
-                    message.attributes().priority(),
-                    message.attributes().id());
+private:
+	/// @brief
+	std::chrono::milliseconds timeSinceEpoch() {
+		auto currentTime = std::chrono::system_clock::now();
+		return std::chrono::duration_cast<std::chrono::milliseconds>(
+				currentTime.time_since_epoch());
+	}
 
-            UAttributes responseAttributes = builder.build();
-            UMessage messageResp(responsePayload, responseAttributes);
-
-            /* Send the response */
-            auto ret =  UpZenohClient::instance()->send(messageResp);
-            return ret;
-        }
+	uprotocol::client::RpcTarget target_;
 };
 
-/* The sample RPC server applications demonstrates how to receive RPC requests and send a response back to the client -
- * The response in this example will be the current time */
-int main(int argc, 
-         char** argv) {
+// This sample RPC server demonstrates how to receive RPC requests and send a
+// response back to the client. In this example, the current time represented
+// as milliseconds since epoch.
+int main() {
+	signal(SIGINT, signalHandler);
 
-    (void)argc;
-    (void)argv;
-    
-    RpcListener listener;
+	auto transport = uprotocol::transport::getTransport<ZenohUTransport>(
+			defaultServerSource(), zenohCfgPath);
 
-    signal(SIGINT, signalHandler);
+	if (nullptr == transport) {
+		spdlog::error("ZenohUTransport init failed");
+		return -1;
+	}
 
-    UStatus status;
-    std::shared_ptr<UpZenohClient> transport = UpZenohClient::instance(
-            BuildUAuthority().setName("device1").build(),
-            BuildUEntity().setName("rpc.client").setMajorVersion(1).setId(1).build());
+	TimeService tserv(transport);
 
-    /* init zenoh utransport */
-    if (nullptr == transport) {
-        spdlog::error("UpZenohClient init failed");
-        return -1;
-    }
+	while (!gTerminate) {
+		sleep(1);
+	}
 
-    auto rpcUri = getRpcUri();
-
-    /* register listener to handle RPC requests */
-    status = transport->registerListener(rpcUri, listener);
-
-    if (UCode::OK != status.code()) {
-        spdlog::error("registerListener failed");
-        return -1;
-    }
-
-    while (!gTerminate) {
-        sleep(1);
-    }
-
-    status = transport->unregisterListener(rpcUri, listener);
-    if (UCode::OK != status.code()) {
-        spdlog::error("unregisterListener failed");
-        return -1;
-    }
-
-    return 0;
+	return 0;
 }
